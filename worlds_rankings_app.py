@@ -1,0 +1,184 @@
+# worlds_rankings_app.py
+import pandas as pd
+import numpy as np
+import streamlit as st
+import matplotlib.pyplot as plt
+from pathlib import Path
+
+# ───────────────────────────────────────────────
+# USER-ADJUSTABLE CONSTANTS
+# ───────────────────────────────────────────────
+CSV_FILE    = "Worlds Design2.csv"   # <-- change if needed
+TOTAL_RUNS  = 10                     # target runs per team
+DROPS       = 2                      # lowest runs discarded
+REPS        = 10_000                 # Monte-Carlo reps
+RNG_SEED    = 42             # random seed for reproducibility  
+# ───────────────────────────────────────────────
+
+# --------------------------------------------------
+# 1) LOAD CSV
+# --------------------------------------------------
+csv_path = Path(__file__).with_name(CSV_FILE)
+if not csv_path.exists():
+    st.error(f"❌  Can't find '{CSV_FILE}' in {csv_path.parent}")
+    st.stop()
+
+raw = pd.read_csv(csv_path)
+
+# auto-detect column names
+score_cols = [c for c in raw.columns if "Score" in c]
+team_cols  = [c for c in raw.columns if "Team"  in c]
+
+if not score_cols or not team_cols:
+    st.error("Couldn't detect team/score columns – adjust script headers manually.")
+    st.stop()
+
+# --------------------------------------------------
+# 2) SPLIT PLAYED & UNPLAYED MATCHES
+# --------------------------------------------------
+played_mask = ~raw[score_cols].isna().any(axis=1)
+played_df   = raw.loc[played_mask].copy()
+todo_df     = raw.loc[~played_mask].copy()
+
+st.sidebar.markdown("### How to use")
+st.sidebar.write(
+"""
+1. **Scroll / filter** the table of upcoming matches below.  
+2. Enter the **scores** you think each alliance will get.  
+3. Hit **Enter** (or click outside the cell) – the predictions refresh.  
+
+Leave a score blank if you want it treated as unknown; the simulation will
+draw it from the team’s own mean ± σ.
+"""
+)
+
+st.title("Interactive Top-20 Probability Calculator")
+
+st.subheader("Enter predicted scores for the un-played matches")
+editable = st.data_editor(
+    todo_df,
+    num_rows="dynamic",
+    column_config={c: st.column_config.NumberColumn(step=1) for c in score_cols},
+    hide_index=True,
+    key="todo_editor"
+)
+
+# merge back the user edits
+raw.update(editable)
+
+# --------------------------------------------------
+# 3) BUILD LIST OF SCORES PER TEAM
+# --------------------------------------------------
+scores_by_team = {}
+for _, row in raw.iterrows():
+    for score_col in score_cols:
+        colour = score_col.split()[0]          # "Red" or "Blue"
+        allies = [c for c in team_cols if c.startswith(colour)]
+        score_val = row[score_col]
+
+        # skip NaN (still un-predicted)
+        if pd.isna(score_val):
+            continue
+
+        for team_col in allies:
+            team = str(row[team_col]).strip()
+            if not team or team.lower() == "nan":
+                continue
+            scores_by_team.setdefault(team, []).append(float(score_val))
+
+teams = sorted(scores_by_team)
+n_teams = len(teams)
+
+# --------------------------------------------------
+# 4) PRE-COMPUTE MEAN & σ OF COMPLETED RUNS
+# --------------------------------------------------
+mu, sigma, n_done = {}, {}, {}
+for t in teams:
+    vals = np.array(scores_by_team[t], dtype=float)
+    n_done[t] = len(vals)
+    if n_done[t]:
+        mu[t] = vals.mean()
+        sigma[t] = vals.std(ddof=1) if n_done[t] > 1 else 5.0
+    else:      # no prior data – assign a wide prior
+        mu[t], sigma[t] = 150.0, 30.0
+
+# --------------------------------------------------
+# 5) MONTE-CARLO
+# --------------------------------------------------
+rng = np.random.default_rng(RNG_SEED)
+preds = np.zeros((n_teams, REPS))
+top20_hits = np.zeros(n_teams, dtype=int)
+cutline = []
+
+for k in range(REPS):
+    avgs = np.empty(n_teams)
+    for idx, t in enumerate(teams):
+        needed = TOTAL_RUNS - n_done[t]
+        # generate future scores
+        future_scores = rng.normal(mu[t], sigma[t], needed)
+        all_scores = np.concatenate([scores_by_team[t], future_scores])
+        all_scores.sort()
+        avgs[idx] = all_scores[DROPS:].mean()  # drop lowest 'DROPS'
+    preds[:, k] = avgs
+
+    order = np.argsort(-avgs)
+    top20_hits[order[:20]] += 1
+    cutline.append(avgs[order[19]])
+
+mean_pred   = preds.mean(axis=1)
+ci_low      = np.percentile(preds,  2.5, axis=1)
+ci_high     = np.percentile(preds, 97.5, axis=1)
+p_top20     = top20_hits / REPS
+
+summary = pd.DataFrame({
+    "Team": teams,
+    "Predicted Avg": mean_pred,
+    "CI Lower 95%": ci_low,
+    "CI Upper 95%": ci_high,
+    "P(Top 20)": p_top20
+}).sort_values("P(Top 20)", ascending=False).reset_index(drop=True)
+
+# --------------------------------------------------
+# 6) DISPLAY RESULTS
+# --------------------------------------------------
+st.subheader("Predicted ranking & 95 % confidence intervals")
+st.dataframe(
+    summary.style.format({
+        "Predicted Avg": "{:.1f}",
+        "CI Lower 95%":  "{:.1f}",
+        "CI Upper 95%":  "{:.1f}",
+        "P(Top 20)":     "{:.1%}"
+    }),
+    use_container_width=True
+)
+
+# --------------------------------------------------
+# 7) VISUALS
+# --------------------------------------------------
+with st.expander("Show visual summaries", expanded=False):
+    # Cut-line histogram
+    fig1, ax1 = plt.subplots(figsize=(8,5))
+    ax1.hist(cutline, bins=25, edgecolor="black")
+    ax1.set_xlabel("Score of 20-th-place team")
+    ax1.set_ylabel("Simulations")
+    ax1.set_title("Distribution of cut-line over simulations")
+    st.pyplot(fig1)
+
+    # Probability bar chart – top 30
+    top30 = summary.head(30).iloc[::-1]        # reverse for horizontal bar
+    fig2, ax2 = plt.subplots(figsize=(9, 0.28*len(top30)+1.5))
+    ax2.barh(top30["Team"], top30["P(Top 20)"])
+    ax2.set_xlabel("Probability of finishing in top 20")
+    ax2.set_title("Top 30 teams")
+    st.pyplot(fig2)
+
+# --------------------------------------------------
+# 8) DOWNLOAD BUTTON
+# --------------------------------------------------
+csv_out = summary.to_csv(index=False).encode()
+st.download_button(
+    "Download table as CSV",
+    csv_out,
+    file_name="predicted_rankings_with_probabilities.csv",
+    mime="text/csv"
+)
