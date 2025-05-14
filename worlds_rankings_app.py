@@ -102,43 +102,27 @@ st.dataframe(leader.head(30).style.format({"Runs":"{:d}","Current Avg":"{:.1f}"}
              use_container_width=True, height=650)
 
 # ─── Monte-Carlo forecast to 10 runs (drop 2) ───────────────────────────
-teams     = sorted(per_team)
-n_teams   = len(teams)
-played    = {t: len(per_team[t]) for t in teams}
-mu        = {t: np.mean(per_team[t]) for t in teams}
-sigma     = {t: (np.std(per_team[t],ddof=1) if len(per_team[t])>=2 else ONE_SIGMA) for t in teams}
-
-rng   = np.random.default_rng(RNG_SEED)
-pred  = np.zeros((n_teams, REPS))
-hits  = np.zeros(n_teams,int)
-cutln = []
+rng = np.random.default_rng(RNG_SEED)
+pred   = np.zeros((n_teams, REPS))
+hits20 = np.zeros(n_teams, int)
+cutln  = []
 
 for k in range(REPS):
     avgs = np.empty(n_teams)
-    for i,t in enumerate(teams):
+    for i, t in enumerate(teams):
         need = max(0, TOTAL_RUNS - played[t])
         fut  = rng.normal(mu[t], sigma[t], need) if need else np.empty(0)
-        all_ = np.concatenate([per_team[t], fut]); all_.sort()
+        all_ = np.concatenate([per_team[t], fut])
+        all_.sort()
         avgs[i] = all_[FINAL_DROPS:].mean()
-    order = np.argsort(-avgs)
-    hits[order[:20]] += 1
-    cutln.append(avgs[order[19]])
-    pred[:,k] = avgs
 
-forecast = (pd.DataFrame({
-             "Team": teams,
-             "Predicted Avg": pred.mean(axis=1),
-             "CI Low": np.percentile(pred,2.5,axis=1),
-             "CI High":np.percentile(pred,97.5,axis=1),
-             "P(Top 20)": hits/REPS})
-           .sort_values("P(Top 20)",ascending=False).reset_index(drop=True))
+    order = np.argsort(-avgs)        # indices, best → worst
+    hits20[order[:20]] += 1          # OK even when <20
 
-st.subheader("Forecast to 10 runs – drop lowest 2")
-st.dataframe(forecast.style.format({
-    "Predicted Avg":"{:.1f}","CI Low":"{:.1f}",
-    "CI High":"{:.1f}","P(Top 20)":"{:.1%}"}),
-    use_container_width=True, height=min(650,28*len(forecast)+25))
+    # store cut-line only if 20 teams exist
+    cutln.append(avgs[order[19]] if len(order) >= 20 else np.nan)
 
+    pred[:, k] = avgs
 # ─── visual summaries ──────────────────────────────────────────────────
 with st.expander("Visual summaries"):
     fig1,ax1=plt.subplots(figsize=(8,4))
