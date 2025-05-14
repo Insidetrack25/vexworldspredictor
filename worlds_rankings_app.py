@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 CSV_FILE    = "Worlds Design2.csv"   # Name of the file in the repo
 TOTAL_RUNS  = 10                     # How many runs each team will have
 DROPS       = 2                      # Number of worst runs discarded
-REPS        = 10_000                 # Monte-Carlo replicates
+REPS        = 2_500                 # Monte-Carlo replicates
 RNG_SEED    = 42                     # For reproducibility
 DEFAULT_SIGMA = 5.0                  # Stdev fallback for 1-run teams
 # ─────────────────────────────────────────────────────────────────────────
