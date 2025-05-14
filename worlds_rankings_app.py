@@ -33,6 +33,8 @@ RNG_SEED     = 42
 DEFAULT_MEAN = 150.0
 DEFAULT_SIGMA= 30.0
 ONE_SIGMA    = 5.0
+DEFAULT_EVENT =58913
+DEFAULT_DIV = 4
 # ───────────────────────────────────────────────────────────────────────
 
 st.set_page_config("VEX IQ Predictor", layout="wide")
