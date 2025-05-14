@@ -128,44 +128,29 @@ leader_df = (pd.DataFrame(leader_rows, columns=["Team","Runs","Current Avg"])
              .sort_values("Current Avg", ascending=False).reset_index(drop=True))
 
 # ── Monte‑Carlo forecast (to 10 runs, drop 2) ─────────────────────────
-mu, sig, n_played = {}, {}, {}
-for t, arr in per_team.items():
-    n_played[t] = len(arr)
-    if len(arr) >= 2:
-        mu[t], sig[t] = np.mean(arr), np.std(arr, ddof=1) or ONE_SIGMA
-    elif len(arr) == 1:
-        mu[t], sig[t] = arr[0], ONE_SIGMA
-    else:
-        mu[t], sig[t] = DEFAULT_MEAN, DEFAULT_SIGMA
-
-teams = sorted(per_team)
-nt = len(teams)
 rng = np.random.default_rng(RNG_SEED)
-preds = np.zeros((nt, REPLICATES))
-hits20 = np.zeros(nt, int)
-cut_line = []
+pred   = np.zeros((n_teams, REPS))
+hits20 = np.zeros(n_teams, int)
+cut    = []
 
-for k in range(REPLICATES):
-    avgs = np.empty(nt)
+for _ in range(REPS):
+    avgs = np.empty(n_teams)
     for i, t in enumerate(teams):
         need = max(0, TOTAL_RUNS - n_played[t])
-        future_scores = rng.normal(mu[t], sig[t], need)
-        all_scores = np.concatenate([per_team[t], future_scores])
+        if need > 0:
+            sig = sigma[t] if sigma[t] > 0 and not np.isnan(sigma[t]) else 1.0
+            future = rng.normal(mu[t], sig, need)
+        else:
+            future = np.empty(0)
+
+        all_scores = np.concatenate([scores[t], future])
         all_scores.sort()
-        avgs[i] = np.mean(all_scores[FINAL_DROPS:])
+        avgs[i] = all_scores[FINAL_DROPS:].mean()
+
     order = np.argsort(-avgs)
     hits20[order[:20]] += 1
-    cut_line.append(avgs[order[19]])
-    preds[:, k] = avgs
-
-forecast_df = (pd.DataFrame({
-                    "Team": teams,
-                    "Predicted Avg": preds.mean(axis=1),
-                    "CI Low":  np.percentile(preds, 2.5, axis=1),
-                    "CI High": np.percentile(preds, 97.5, axis=1),
-                    "P(top 20)": hits20 / REPLICATES})
-               .sort_values("P(top 20)", ascending=False)
-               .reset_index(drop=True))
+    cut.append(avgs[order[19]])
+    pred[:, _] = avgs
 
 # ── display tables and charts ─────────────────────────────────────────
 col1, col2 = st.columns(2)
