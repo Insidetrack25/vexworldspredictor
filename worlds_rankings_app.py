@@ -128,6 +128,8 @@ leader_df = (pd.DataFrame(leader_rows, columns=["Team","Runs","Current Avg"])
              .sort_values("Current Avg", ascending=False).reset_index(drop=True))
 
 # ── Monte‑Carlo forecast (to 10 runs, drop 2) ─────────────────────────
+teams     = sorted(scores)      # list of team IDs
+n_teams   = len(teams)          # <─ this is what pred = np.zeros(…) needs
 rng = np.random.default_rng(RNG_SEED)
 pred   = np.zeros((n_teams, REPS))
 hits20 = np.zeros(n_teams, int)
