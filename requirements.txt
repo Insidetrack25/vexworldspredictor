@@ -2,3 +2,4 @@ streamlit>=1.34
 pandas>=2.2
 numpy>=1.26
 matplotlib>=3.9
+requests>=2.32
