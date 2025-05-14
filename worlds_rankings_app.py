@@ -3,7 +3,7 @@ import datetime as dt, requests, streamlit as st
 import pandas as pd, numpy as np, matplotlib.pyplot as plt
 
 # ─── PUT YOUR PERSONAL ROBOTEVENTS TOKEN HERE ───────────────────────────
-RE_TOKEN = "YOUR_TOKEN_HERE"
+RE_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIzIiwianRpIjoiMjRkYjJkYjY3NTYwNTk3ZDgyYjQzZjhiMzU2ZmE4ODhkYTQ5MGU5MDZmNTIwZjdhNmJlMGY4NmRmNGQyNmRiMmE3ZjY3MTVjMGFiOTJjNWQiLCJpYXQiOjE3NDcxOTk5ODQuOTg0Mjc3LCJuYmYiOjE3NDcxOTk5ODQuOTg0Mjg4LCJleHAiOjI2OTM4ODQ3ODQuOTc4NTUsInN1YiI6IjExMTkyOCIsInNjb3BlcyI6W119.QAjwPG4z1s6D1OKU9zhtSCIVJicUkSSgnA9MgQBIlK9XomAt8OnE1i5-6GcutO8AKxIv5jU_auo5WGti0ms5ukmjV0b74GdXRyiVLd2yYSKzJwJo1nftGACKjG4YvNTjJEmmlx4Irs2rfCF7O6jJwsLt-up3gw8zHBHGJ-4j0Ras54AJ-_5fLNzW4NiY5yAx-UXa4CK2jCFqlaBbRNXhHesrFYKaxhhN4tBue6yl2XyX8Ry6CNWQVjhpVyHZdeTfB4qS01wGc8UphCv7Kb9zsuSrnS0QvbdR-HSMjbBv1p8SmnMLTXj_YvTUhDXg7F-qDyHnZzs59ohqSQQweNOn2LtxBH9GJh6y19Ma6z1pLjdzw8rl8MX-h1yBFl3Tmy3nrqKjkbJaPPo04Z7FOA29wVv9IFxRt78d4DI-xiJIB-NBkKiVjbidVB6RUtyP-AW-3_xOZAidjR3Rlij9jTSEtwb_Ln2JqZdJ6qURgqbxfoI-PlFm7075aGrO8GQ8W0I942UxBWhHANJ_mQDXRmbjMgYBU2MkM41ap60rvgzEW_UlUB6pAP8zia9PbhDhdleKPzmiqNmjprJ4Kmk9XJxpvpYSwAjL0B1E9vDbe18uUSkIGdg1AvWoDVmTlFcrP_NFJ6rR5A8OPv_RZSBqq4k4DKZyR1ilxWwX4q0JSglsgns"
 # -----------------------------------------------------------------------
 
 # ---------- GLOBAL CONSTANTS ----------
