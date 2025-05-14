@@ -1,181 +1,204 @@
+# leaderboard_predictor_app.py
 """
-VEX IQ Worlds – Top-20 predictor (token embedded)
-
-* Pulls Teamwork-qualification matches from RobotEvents
-  https://www.robotevents.com/api/v2/events/{event}/divisions/{div}/matches?round[]=2
-* Lets you fill in scores still to be played
-* Monte-Carlo (drop 2 of 10) → predicted avg, 95 % CI, P(top-20)
+VEX IQ Worlds – live leaderboard **plus** interactive forecast
+-------------------------------------------------------------
+Built on the counting logic we just fixed:
+* A run for an alliance is counted **only if**
+  1. that alliance’s JSON score is positive, **or**
+  2. the match has been certified (`scored == true`) **and** the JSON score is
+     numeric (0 or > 0).
+* Each team’s practice run is already absent from the schedule, so no practice
+  toggle is needed.
+* Current leaderboard: drop ⌊runs / 4⌋ lowest scores.
+* Forecast to 10 runs: drop the lowest 2 of 10.
+* You can type predictions for still‑blank future rounds; the app recomputes:
+  – 95 % CI of each team’s final average.
+  – Probability of finishing in the top 20.
+  – Histogram of the 20‑place cut‑line.
+  – Bar‑chart of top‑20 probabilities (top 30 teams).
 """
+import datetime as dt, typing, math, requests, streamlit as st
+import pandas as pd, numpy as np
+import matplotlib.pyplot as plt
 
-import datetime as dt
-from pathlib import Path
-import requests, streamlit as st, pandas as pd, numpy as np, matplotlib.pyplot as plt
+# ── RobotEvents token ──────────────────────────────────────────────────
+RE_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIzIiwianRpIjoiMjRkYjJkYjY3NTYwNTk3ZDgyYjQzZjhiMzU2ZmE4ODhkYTQ5MGU5MDZmNTIwZjdhNmJlMGY4NmRmNGQyNmRiMmE3ZjY3MTVjMGFiOTJjNWQiLCJpYXQiOjE3NDcxOTk5ODQuOTg0Mjc3LCJuYmYiOjE3NDcxOTk5ODQuOTg0Mjg4LCJleHAiOjI2OTM4ODQ3ODQuOTc4NTUsInN1YiI6IjExMTkyOCIsInNjb3BlcyI6W119.QAjwPG4z1s6D1OKU9zhtSCIVJicUkSSgnA9MgQBIlK9XomAt8OnE1i5-6GcutO8AKxIv5jU_auo5WGti0ms5ukmjV0b74GdXRyiVLd2yYSKzJwJo1nftGACKjG4YvNTjJEmmlx4Irs2rfCF7O6jJwsLt-up3gw8zHBHGJ-4j0Ras54AJ-_5fLNzW4NiY5yAx-UXa4CK2jCFqlaBbRNXhHesrFYKaxhhN4tBue6yl2XyX8Ry6CNWQVjhpVyHZdeTfB4qS01wGc8UphCv7Kb9zsuSrnS0QvbdR-HSMjbBv1p8SmnMLTXj_YvTUhDXg7F-qDyHnZzs59ohqSQQweNOn2LtxBH9GJh6y19Ma6z1pLjdzw8rl8MX-h1yBFl3Tmy3nrqKjkbJaPPo04Z7FOA29wVv9IFxRt78d4DI-xiJIB-NBkKiVjbidVB6RUtyP-AW-3_xOZAidjR3Rlij9jTSEtwb_Ln2JqZdJ6qURgqbxfoI-PlFm7075aGrO8GQ8W0I942UxBWhHANJ_mQDXRmbjMgYBU2MkM41ap60rvgzEW_UlUB6pAP8zia9PbhDhdleKPzmiqNmjprJ4Kmk9XJxpvpYSwAjL0B1E9vDbe18uUSkIGdg1AvWoDVmTlFcrP_NFJ6rR5A8OPv_RZSBqq4k4DKZyR1ilxWwX4q0JSglsgns"  # <– replace with your token
+# ----------------------------------------------------------------------
 
-# ───►  PUT YOUR TOKEN HERE  ◄─────────────────────────────────────────────
-RE_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIzIiwianRpIjoiMTgxZjk1ODg3YmZmOGJkMTc5ODdmZWI1MzhhNWVlMzIzZjcyNTBiNjMwZDRkOTI3OGE3MWZhMTMzNGI5OGJiYzU5ZTQ1OTFlMzhiMThjOTUiLCJpYXQiOjE3NDcxOTg0MDAuNDQ5MDQ0OSwibmJmIjoxNzQ3MTk4NDAwLjQ0OTA0NTksImV4cCI6MjY5Mzg4MzIwMC40NDQ3NzE4LCJzdWIiOiIxMTE5MjgiLCJzY29wZXMiOltdfQ.bw4iODUD-TjkUd5g37wsdlNwHShOF1kzJwJr5s3aCZdo4XBfoVGo_d4Bco9rq83-8VTgVQsWJhiy8VG4Yq4rulIwfiletZrhDVDkg4Vj9cSlgTQ5P7uy1d89eXy4XNCEDkv7-bxWSRgrov1tuReXOXryqYgA4-6rT-tC_x2zxtrwlqx1ci6-98vBPQFlnnIyr-BW8z3_0LdljQ7bTgodrawQOg1Lfem_STOYYv8K5G6LkJnHBsH9hLc6FC74O8YoN1UbVvcz3R83ox6b31UdvdE0upAw_hpuiZ-14h5zzaDHzAIegjgvsSamSjcGuIFQTOdH85fjZGavASlqabf3u-wqTVpBVdAFChYpCg5__NlXc9BlYpWPW38bZc_XbivjjmYBt0eHmuJnxrNGU3ameC0WLaNhHun1Mky2GpiUJaBoj-1PjJdVWYcAwBUO73ogZh7EUp_ElD_jZ-v01WIUeRQv2DrsaSO0Ww2fMBXpHfFQlkVnt1oX80V0ngqBKzVfLmel-t5qBhZZy2El0lFzaNb08Tq6cWlEXkimYQPzmCft5UPun0rAAdRVJ-cBFOCaE4g6ceb1K-R2fOltkh0YXOIwjKS0vC4mX0pvsQ8nMl1UQ4iT6rD2iSfRlI22g9qy0z9psulZBJ00egI4X0RrLnrhJn0UTXs-juI0SsevusE"
-# ─────────────────────────────────────────────────────────────────────────
+DEFAULT_EVENT, DEFAULT_DIV = "58913", "4"
+CACHE_TTL = 600    # sec cache RobotEvents JSON
+TOTAL_RUNS = 10    # final number of scored runs
+FINAL_DROPS = 2    # drop lowest 2 of 10
+REPLICATES = 10_000
+RNG_SEED = 42
+DEFAULT_MEAN, DEFAULT_SIGMA, ONE_SIGMA = 150.0, 30.0, 5.0
 
-TOTAL_RUNS   = 10
-DROPS        = 2
-REPS         = 10_000
-RNG_SEED     = 42
-DEFAULT_SIGMA = 5.0
-CACHE_TTL    = 600
-CSV_FALLBACK = "Worlds Design2.csv"
+st.set_page_config("VEX IQ Predictor", layout="wide")
 
-st.set_page_config("Top-20 Predictor", layout="wide")
+# ── sidebar ────────────────────────────────────────────────────────────
+st.sidebar.header("RobotEvents IDs")
+event_id = st.sidebar.text_input("Event ID", value=DEFAULT_EVENT)
+division_id = st.sidebar.text_input("Division ID", value=DEFAULT_DIV)
 
-# ═════════════ Sidebar – input Event & Division ════════════════════════
-event_id    = st.sidebar.text_input("Event ID",    placeholder="58913")
-division_id = st.sidebar.text_input("Division ID", placeholder="4")
-use_api     = bool(event_id and division_id)
+if not (event_id and division_id):
+    st.stop()
 
-if use_api:
-    st.sidebar.success("Using live RobotEvents data")
-else:
-    st.sidebar.warning("Enter Event + Division IDs or CSV fallback is used")
-
-# ═════════════ Fetch matches (cached) ═════════════════════════════════=
-@st.cache_data(show_spinner="Fetching RobotEvents …", ttl=CACHE_TTL)
-def fetch_matches(event_id: str, div_id: str, token: str) -> pd.DataFrame:
-    base = (f"https://www.robotevents.com/api/v2/events/{event_id}"
-            f"/divisions/{div_id}/matches")
-    params  = {"round[]": 2, "per_page": 50}
-    headers = {"accept": "application/json", "Authorization": f"Bearer {token}"}
-
-    rows, url = [], base
-    while url:
-        r = requests.get(url, params=params, headers=headers, timeout=15)
-        if r.status_code != 200:
-            raise RuntimeError(f"API {r.status_code}: {r.text[:200]}")
-        j = r.json()
-        rows.extend(j["data"])
-        url, params = j["meta"]["next_page_url"], None
-
-    if not rows:
-        raise ValueError("No matches returned – check IDs or token")
-
-    recs = []
+# ── fetch helper (cached) ──────────────────────────────────────────────
+@st.cache_data(show_spinner="Fetching RobotEvents…", ttl=CACHE_TTL)
+def fetch_matches(eid: str, did: str, token: str) -> pd.DataFrame:
+    url = f"https://www.robotevents.com/api/v2/events/{eid}/divisions/{did}/matches"
+    hdrs = {"accept": "application/json", "Authorization": f"Bearer {token}"}
+    rows, page = [], url
+    while page:
+        r = requests.get(page, params={"round[]": 2, "per_page": 50}, headers=hdrs, timeout=15)
+        r.raise_for_status()
+        j = r.json(); rows += j["data"]; page = j["meta"]["next_page_url"]
+    rec = []
     for m in rows:
-        red, blue = None, None
-        for a in m["alliances"]:
-            if a["color"].lower() == "red":  red = a
-            if a["color"].lower() == "blue": blue = a
-        recs.append({
-            "match":       m["matchnum"],
-            "Red Team 1":  red["teams"][0]["team"]["name"]  if red["teams"]  else None,
-            "Blue Team 1": blue["teams"][0]["team"]["name"] if blue["teams"] else None,
-            "Red Score":   red["score"],
-            "Blue Score":  blue["score"],
+        red  = next(a for a in m["alliances"] if a["color"].lower() == "red")
+        blue = next(a for a in m["alliances"] if a["color"].lower() == "blue")
+        rec.append({
+            "match":      m["matchnum"],
+            "scored":     m["scored"],
+            "Red Team":   red ["teams"][0]["team"]["name"]  if red ["teams"] else None,
+            "Blue Team":  blue["teams"][0]["team"]["name"] if blue["teams"] else None,
+            "Red Score":  red ["score"],
+            "Blue Score": blue["score"],
         })
-    return pd.DataFrame(recs).sort_values("match", ignore_index=True)
+    return pd.DataFrame(rec).sort_values("match", ignore_index=True)
 
-# choose live API or CSV fallback
-if use_api:
-    try:
-        raw = fetch_matches(event_id.strip(), division_id.strip(), RE_TOKEN)
-        st.caption(f"📶  Pulled {len(raw)} matches "
-                   f"({dt.datetime.utcnow():%Y-%m-%d %H:%MZ})")
-    except Exception as e:
-        st.error(f"RobotEvents fetch failed → {e}")
-        st.stop()
-else:
-    csv = Path(__file__).with_name(CSV_FALLBACK)
-    if not csv.exists():
-        st.error("No API IDs supplied and CSV fallback missing.")
-        st.stop()
-    raw = pd.read_csv(csv)
-    st.caption(f"📄  Loaded {len(raw)} rows from {CSV_FALLBACK}")
+try:
+    df = fetch_matches(event_id.strip(), division_id.strip(), RE_TOKEN)
+except Exception as e:
+    st.error(e)
+    st.stop()
 
-score_cols = ["Red Score", "Blue Score"]
-team_cols  = ["Red Team 1", "Blue Team 1"]
+st.caption(f"{len(df)} match rows fetched  ({dt.datetime.utcnow():%Y-%m-%d %H:%MZ})")
 
-# ═════ split played vs un-played ═════
-todo_df = raw[raw[score_cols].isna().any(axis=1)].copy()
-st.title("VEX IQ Worlds – interactive top-20 predictor")
-st.markdown(
-"Enter **expected scores** for the un-played matches below. "
-"Leave blank → simulator samples that alliance’s score from its own μ ± σ."
-)
+score_cols, team_cols = ["Red Score","Blue Score"], ["Red Team","Blue Team"]
 
-editable = st.data_editor(
-    todo_df,
+# ── mark completed alliances (same rule as leaderboard) ───────────────
+completed_mask = []
+for idx, row in df.iterrows():
+    red_done  = (not pd.isna(row["Red Score"])  and row["Red Score"] > 0) or (row["scored"] and not pd.isna(row["Red Score"]))
+    blue_done = (not pd.isna(row["Blue Score"]) and row["Blue Score"] > 0) or (row["scored"] and not pd.isna(row["Blue Score"]))
+    completed_mask.append(red_done or blue_done)
+df["finished_any"] = completed_mask
+
+completed_df = df[df["finished_any"]].copy()
+future_df    = df[~df["finished_any"]].copy()
+
+# ── editable grid for future rounds ───────────────────────────────────
+st.title("VEX IQ Predictor – leaderboard + forecast")
+st.markdown("Type predictions for still‑blank future rounds. The table and charts update live.")
+
+edited = st.data_editor(
+    future_df,
     hide_index=True,
     num_rows="dynamic",
     column_config={c: st.column_config.NumberColumn(step=1) for c in score_cols},
 )
-raw.update(editable)
+future_df.update(edited)
 
-# ═════ build per-team score lists ═════
-scores = {}
-for _, r in raw.iterrows():
-    for col in ("Red", "Blue"):
-        t = str(r[f"{col} Team 1"]).strip()
-        if not t or t.lower() == "nan":
+full = pd.concat([completed_df, future_df], ignore_index=True)
+
+# ── per‑team scores (completed + user predictions) ────────────────────
+per_team = {}
+for _, row in full.iterrows():
+    for s_col, t_col in zip(score_cols, team_cols):
+        team = str(row[t_col]).strip()
+        if not team or team.lower() == "nan":
             continue
-        val = r[f"{col} Score"]
+        val = row[s_col]
+        # count if val is numeric (prediction or completed criteria met)
         if pd.isna(val):
             continue
-        scores.setdefault(t, []).append(float(val))
+        # ensure counting rules (for predictions we accept any numeric value)
+        if (val > 0) or (row["scored"] and not pd.isna(val)):
+            per_team.setdefault(team, []).append(float(val))
 
-teams = sorted(scores)
-mu, sigma, n_played = {}, {}, {}
-for t in teams:
-    arr = np.asarray(scores[t], float)
+# ── leaderboard (drop ⌊n/4⌋) ─────────────────────────────────────────
+leader_rows = []
+for team, scores in per_team.items():
+    n = len(scores)
+    drops = n // 4
+    avg = np.mean(sorted(scores)[drops:]) if scores else 0.0
+    leader_rows.append((team, n, avg))
+leader_df = (pd.DataFrame(leader_rows, columns=["Team","Runs","Current Avg"])  
+             .sort_values("Current Avg", ascending=False).reset_index(drop=True))
+
+# ── Monte‑Carlo forecast (to 10 runs, drop 2) ─────────────────────────
+mu, sig, n_played = {}, {}, {}
+for t, arr in per_team.items():
     n_played[t] = len(arr)
-    mu[t]    = arr.mean() if arr.size else 150.0
-    sigma[t] = arr.std(ddof=1) if arr.size > 1 else DEFAULT_SIGMA
+    if len(arr) >= 2:
+        mu[t], sig[t] = np.mean(arr), np.std(arr, ddof=1) or ONE_SIGMA
+    elif len(arr) == 1:
+        mu[t], sig[t] = arr[0], ONE_SIGMA
+    else:
+        mu[t], sig[t] = DEFAULT_MEAN, DEFAULT_SIGMA
 
-# ═════ Monte-Carlo ═════
+teams = sorted(per_team)
+nt = len(teams)
 rng = np.random.default_rng(RNG_SEED)
-preds = np.zeros((len(teams), REPS))
-hits  = np.zeros(len(teams), int)
-cut   = []
+preds = np.zeros((nt, REPLICATES))
+hits20 = np.zeros(nt, int)
+cut_line = []
 
-for k in range(REPS):
-    avgs = np.empty(len(teams))
+for k in range(REPLICATES):
+    avgs = np.empty(nt)
     for i, t in enumerate(teams):
-        fut = rng.normal(mu[t], sigma[t], TOTAL_RUNS - n_played[t])
-        all_scores = np.concatenate([scores[t], fut])
+        need = max(0, TOTAL_RUNS - n_played[t])
+        future_scores = rng.normal(mu[t], sig[t], need)
+        all_scores = np.concatenate([per_team[t], future_scores])
         all_scores.sort()
-        avgs[i] = all_scores[DROPS:].mean()
+        avgs[i] = np.mean(all_scores[FINAL_DROPS:])
     order = np.argsort(-avgs)
-    hits[order[:20]] += 1
-    cut.append(avgs[order[19]])
+    hits20[order[:20]] += 1
+    cut_line.append(avgs[order[19]])
     preds[:, k] = avgs
 
-df = pd.DataFrame({
-        "Team": teams,
-        "Predicted Avg": preds.mean(axis=1),
-        "CI Low":  np.percentile(preds,  2.5, axis=1),
-        "CI High": np.percentile(preds, 97.5, axis=1),
-        "P(Top 20)": hits / REPS}).sort_values("P(Top 20)", ascending=False)
+forecast_df = (pd.DataFrame({
+                    "Team": teams,
+                    "Predicted Avg": preds.mean(axis=1),
+                    "CI Low":  np.percentile(preds, 2.5, axis=1),
+                    "CI High": np.percentile(preds, 97.5, axis=1),
+                    "P(top 20)": hits20 / REPLICATES})
+               .sort_values("P(top 20)", ascending=False)
+               .reset_index(drop=True))
 
-# ═════ table ═════
-st.subheader("Projected qualification table")
-st.dataframe(
-    df.style.format({"Predicted Avg":"{:.1f}",
-                     "CI Low":"{:.1f}",
-                     "CI High":"{:.1f}",
-                     "P(Top 20)":"{:.1%}"}),
-    use_container_width=True)
+# ── display tables and charts ─────────────────────────────────────────
+col1, col2 = st.columns(2)
+with col1:
+    st.subheader("Current leaderboard  –  drop ⌊runs / 4⌋")
+    st.dataframe(leader_df.style.format({"Runs":"{:d}", "Current Avg":"{:.1f}"}),
+        use_container_width=True, height=min(600, 28*25))
+with col2:
+    st.subheader("Forecast to 10 runs  –  drop lowest 2")
+    st.dataframe(forecast_df.style.format({
+        "Predicted Avg":"{:.1f}",
+        "CI Low":"{:.1f}", "CI High":"{:.1f}",
+        "P(top 20)":"{:.1%}"}),
+        use_container_width=True, height=min(600, 28*25))
 
-# ═════ visuals ═════
 with st.expander("Visual summaries"):
+    # cut‑line histogram
     fig1, ax1 = plt.subplots(figsize=(8,4))
-    ax1.hist(cut, bins=25, edgecolor="black")
-    ax1.set_xlabel("Score of 20-th-place team")
+    ax1.hist(cut_line, bins=25, edgecolor="black")
+    ax1.set_xlabel("20‑place cut‑line score")
     ax1.set_ylabel("Simulations")
-    ax1.set_title("Cut-line distribution")
+    ax1.set_title("Cut‑line distribution (10 k runs)")
     st.pyplot(fig1)
 
-    top30 = df.head(30).iloc[::-1]
+    # probability bar chart
+    top30 = forecast_df.head(30).iloc[::-1]
     fig2, ax2 = plt.subplots(figsize=(9, 0.28*len(top30)+1.2))
-    ax2.barh(top30["Team"], top30["P(Top 20)"])
-    ax2.set_xlabel("Probability of finishing in top 20")
-    ax2.set_title("Top-30 teams")
+    ax2.barh(top30["Team"], top30["P(top 20)"])
+    ax2.set_xlabel("Probability of top‑20")
+    ax2.set_title("Top‑30 teams – forecast")
     st.pyplot(fig2)
 
-st.download_button("Download CSV",
-                   df.to_csv(index=False).encode(),
-                   "predicted_rankings.csv", "text/csv")
+# download
+st.download_button("Download forecast CSV",
+                   forecast_df.to_csv(index=False).encode(),
+                   "predicted_rankings.csv","text/csv")
